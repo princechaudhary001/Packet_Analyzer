@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DPI Engine — Traffic Inspector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0B0E11;
+    --panel:#11161C;
+    --panel-raised:#151B22;
+    --border:#1F2731;
+    --text:#D7DEE5;
+    --muted:#6B7785;
+    --fwd:#3DDC8A;
+    --blk:#FF5C5C;
+    --accent:#5B8CFF;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  body{min-height:100vh;}
+
+  ::selection{background:var(--accent);color:#0B0E11;}
+
+  a{color:var(--accent);}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 24px 80px;}
+
+  header.top{
+    display:flex;align-items:center;justify-content:space-between;
+    border-bottom:1px solid var(--border);
+    padding-bottom:20px;margin-bottom:28px;
+  }
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--fwd);box-shadow:0 0 12px var(--fwd);}
+  .brand h1{
+    font-family:var(--mono);font-size:18px;font-weight:700;letter-spacing:0.02em;margin:0;
+    text-transform:uppercase;
+  }
+  .brand .sub{font-family:var(--mono);color:var(--muted);font-size:12px;margin-left:4px;}
+  .status{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;}
+  .status b{color:var(--text);}
+
+  /* ===== Signature element: live packet stream ticker ===== */
+  .stream{
+    position:relative;height:46px;border:1px solid var(--border);
+    background:var(--panel);border-radius:6px;overflow:hidden;margin-bottom:28px;
+  }
+  .stream .label{
+    position:absolute;left:12px;top:50%;transform:translateY(-50%);
+    font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:0.08em;
+    text-transform:uppercase;z-index:2;background:linear-gradient(90deg, var(--panel) 70%, transparent);
+    padding-right:30px;
+  }
+  .stream .track{
+    position:absolute;top:0;left:90px;right:0;bottom:0;
+    display:flex;align-items:center;gap:5px;
+    animation: slide 14s linear infinite;
+    will-change: transform;
+  }
+  .stream .track.paused{animation-play-state:paused;}
+  @keyframes slide{ from{transform:translateX(0);} to{transform:translateX(-50%);} }
+  .pkt{
+    width:9px;height:20px;border-radius:2px;flex:0 0 auto;
+    background:var(--muted);opacity:0.35;
+  }
+  .pkt.fwd{background:var(--fwd);opacity:0.9;}
+  .pkt.blk{background:var(--blk);opacity:0.9;}
+
+  /* ===== Layout grid ===== */
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start;}
+  @media (max-width:880px){ .grid{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:20px;
+  }
+  .panel + .panel{margin-top:20px;}
+  .panel h2{
+    font-family:var(--mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 16px;font-weight:600;
+  }
+
+  /* Form */
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;}
+  .dropzone{
+    border:1px dashed var(--border);border-radius:6px;padding:18px;text-align:center;
+    cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--muted);
+    transition:border-color .15s, color .15s;
+  }
+  .dropzone:hover, .dropzone.drag{border-color:var(--accent);color:var(--text);}
+  .dropzone input{display:none;}
+  .dropzone .fname{color:var(--fwd);margin-top:6px;word-break:break-all;}
+
+  select, input[type=text], input[type=number]{
+    width:100%;background:var(--panel-raised);border:1px solid var(--border);
+    color:var(--text);padding:9px 10px;border-radius:5px;font-family:var(--sans);font-size:13px;
+    outline:none;
+  }
+  select:focus, input:focus{border-color:var(--accent);}
+
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+  .tag-input{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);background:var(--panel-raised);
+    border-radius:5px;padding:7px;min-height:38px;}
+  .tag-input input{border:none;background:transparent;flex:1;min-width:80px;padding:3px 4px;font-size:13px;}
+  .tag-input input:focus{outline:none;}
+  .tag{
+    display:inline-flex;align-items:center;gap:6px;background:rgba(91,140,255,0.12);
+    border:1px solid rgba(91,140,255,0.35);color:var(--accent);font-size:11px;font-family:var(--mono);
+    padding:3px 7px;border-radius:4px;
+  }
+  .tag button{background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;line-height:1;padding:0;}
+
+  .preset-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .preset{
+    font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--border);
+    background:transparent;padding:4px 8px;border-radius:4px;cursor:pointer;
+  }
+  .preset:hover{color:var(--text);border-color:var(--accent);}
+
+  button.run{
+    width:100%;background:var(--fwd);color:#0B0E11;border:none;border-radius:6px;
+    padding:12px;font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:0.04em;
+    text-transform:uppercase;cursor:pointer;margin-top:6px;
+    transition:opacity .15s, transform .1s;
+  }
+  button.run:hover{opacity:0.9;}
+  button.run:active{transform:scale(0.99);}
+  button.run:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;}
+
+  .error-box{
+    border:1px solid var(--blk);background:rgba(255,92,92,0.08);color:#FFB3B3;
+    padding:12px;border-radius:6px;font-family:var(--mono);font-size:12px;margin-top:14px;
+    white-space:pre-wrap;word-break:break-word;
+  }
+
+  /* Results */
+  .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+  @media (max-width:700px){ .stat-grid{grid-template-columns:repeat(2,1fr);} }
+  .stat{
+    background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;
+  }
+  .stat .v{font-family:var(--mono);font-size:24px;font-weight:700;}
+  .stat .k{font-size:11px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.06em;}
+  .stat.fwd .v{color:var(--fwd);}
+  .stat.blk .v{color:var(--blk);}
+
+  .chart-wrap{position:relative;height:280px;}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th{
+    text-align:left;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;
+    color:var(--muted);border-bottom:1px solid var(--border);padding:8px 10px;font-weight:600;
+  }
+  td{padding:8px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;}
+  tr:last-child td{border-bottom:none;}
+  .badge{
+    display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-family:var(--mono);
+  }
+  .badge.fwd{background:rgba(61,220,138,0.12);color:var(--fwd);border:1px solid rgba(61,220,138,0.3);}
+  .badge.blk{background:rgba(255,92,92,0.12);color:var(--blk);border:1px solid rgba(255,92,92,0.3);}
+
+  .table-scroll{max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;}
+  .table-scroll table{margin:0;}
+  .table-scroll thead th{position:sticky;top:0;background:var(--panel);}
+
+  .empty{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:80px 20px;color:var(--muted);text-align:center;border:1px dashed var(--border);
+    border-radius:8px;font-family:var(--mono);font-size:13px;line-height:1.7;
+  }
+  .empty b{color:var(--text);}
+
+  .download-row{display:flex;gap:10px;margin-top:10px;}
+  .dl-btn{
+    flex:1;text-align:center;font-family:var(--mono);font-size:11px;text-transform:uppercase;
+    letter-spacing:0.04em;border:1px solid var(--border);color:var(--text);padding:9px;border-radius:5px;
+    text-decoration:none;background:var(--panel-raised);
+  }
+  .dl-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+  .loading{
+    display:flex;align-items:center;gap:10px;color:var(--muted);font-family:var(--mono);font-size:13px;
+    padding:60px 0;justify-content:center;
+  }
+  .spinner{
+    width:14px;height:14px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--fwd);
+    animation:spin 0.7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .section-gap{margin-top:24px;}
+
+  footer{margin-top:50px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>DPI Engine</h1>
+      <span class="sub">// traffic inspector</span>
+    </div>
+    <div class="status" id="engineStatus">checking engines…</div>
+  </header>
+
+  <div class="stream">
+    <span class="label">live feed</span>
+    <div class="track" id="streamTrack"></div>
+  </div>
+
+  <div class="grid">
+    <!-- Left: controls -->
+    <div>
+      <div class="panel">
+        <h2>Capture</h2>
+        <div class="field">
+          <label>PCAP file</label>
+          <div class="dropzone" id="dropzone">
+            <div>Drop a .pcap file here<br>or click to browse</div>
+            <div class="fname" id="fname"></div>
+            <input type="file" id="fileInput" accept=".pcap,.pcapng,.cap">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Engine</label>
+          <select id="engineSelect">
+            <option value="simple">Simple (single-threaded)</option>
+            <option value="multi-threaded">Multi-threaded</option>
+          </select>
+        </div>
+
+        <div class="field" id="threadFields" style="display:none;">
+          <label>Thread topology</label>
+          <div class="row2">
+            <input type="number" id="lbs" value="2" min="1" max="16" placeholder="LBs">
+            <input type="number" id="fps" value="2" min="1" max="16" placeholder="FPs per LB">
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Blocking rules</h2>
+
+        <div class="field">
+          <label>Block apps</label>
+          <div class="tag-input" id="appTags">
+            <input type="text" id="appInput" placeholder="Type app, Enter to add">
+          </div>
+          <div class="preset-row">
+            <button class="preset" data-target="app" data-val="YouTube">YouTube</button>
+            <button class="preset" data-target="app" data-val="TikTok">TikTok</button>
+            <button class="preset" data-target="app" data-val="Facebook">Facebook</button>
+            <button class="preset" data-target="app" data-val="Instagram">Instagram</button>
+            <button class="preset" data-target="app" data-val="Netflix">Netflix</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Block source IPs</label>
+          <div class="tag-input" id="ipTags">
+            <input type="text" id="ipInput" placeholder="e.g. 192.168.1.50, Enter to add">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Block domains (substring match)</label>
+          <div class="tag-input" id="domainTags">
+            <input type="text" id="domainInput" placeholder="e.g. tiktok, Enter to add">
+          </div>
+        </div>
+
+        <button class="run" id="runBtn">Analyze capture</button>
+        <div class="error-box" id="errorBox" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- Right: results -->
+    <div id="results">
+      <div class="empty">
+        Upload a pcap and hit <b>Analyze capture</b> to see the breakdown.<br>
+        Stats, application classification, and blocked-flow detail will render here.
+      </div>
+    </div>
+  </div>
+
+  <footer>DPI Engine Dashboard — built on top of the C++ packet analyzer core</footer>
+</div>
+
+<script>
+const API_BASE = window.location.origin.includes('8123') || window.location.protocol === 'file:'
+  ? 'http://127.0.0.1:8123'
+  : '';
+
+// ---------- Signature ticker ----------
+function buildTicker(pattern){
+  const track = document.getElementById('streamTrack');
+  track.innerHTML = '';
+  const seq = pattern && pattern.length ? pattern : Array.from({length:40}, () => Math.random() > 0.18 ? 'fwd' : (Math.random() > 0.5 ? 'blk' : 'idle'));
+  const doubled = seq.concat(seq); // seamless loop
+  doubled.forEach(kind => {
+    const d = document.createElement('div');
+    d.className = 'pkt ' + (kind === 'fwd' ? 'fwd' : kind === 'blk' ? 'blk' : '');
+    track.appendChild(d);
+  });
+}
+buildTicker();
+
+// ---------- health check ----------
+fetch(API_BASE + '/api/health').then(r => r.json()).then(d => {
+  const el = document.getElementById('engineStatus');
+  const simple = d.engines_available.simple ? 'simple ✓' : 'simple ✗';
+  const mt = d.engines_available['multi-threaded'] ? 'mt ✓' : 'mt ✗';
+  el.innerHTML = `<b>API connected</b> &nbsp;·&nbsp; ${simple} &nbsp;·&nbsp; ${mt}`;
+}).catch(() => {
+  document.getElementById('engineStatus').innerHTML = '<span style="color:var(--blk)">API unreachable</span>';
+});
+
+// ---------- engine selector toggles thread fields ----------
+document.getElementById('engineSelect').addEventListener('change', e => {
+  document.getElementById('threadFields').style.display = e.target.value === 'multi-threaded' ? 'block' : 'none';
+});
+
+// ---------- file dropzone ----------
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+let selectedFile = null;
+
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) setFile(fileInput.files[0]);
+});
+['dragenter','dragover'].forEach(evt => dropzone.addEventListener(evt, e => {
+  e.preventDefault(); dropzone.classList.add('drag');
+}));
+['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+}));
+dropzone.addEventListener('drop', e => {
+  if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+});
+function setFile(f){
+  selectedFile = f;
+  document.getElementById('fname').textContent = f.name;
+}
+
+// ---------- tag inputs ----------
+function setupTagInput(containerId, inputId, store){
+  const container = document.getElementById(containerId);
+  const input = document.getElementById(inputId);
+  function render(){
+    container.querySelectorAll('.tag').forEach(t => t.remove());
+    store.forEach((val, i) => {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.innerHTML = `${val} <button data-i="${i}">×</button>`;
+      tag.querySelector('button').addEventListener('click', () => {
+        store.splice(i, 1); render();
+      });
+      container.insertBefore(tag, input);
+    });
+  }
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && input.value.trim()){
+      e.preventDefault();
+      store.push(input.value.trim());
+      input.value = '';
+      render();
+    } else if (e.key === 'Backspace' && !input.value && store.length){
+      store.pop(); render();
+    }
+  });
+  return render;
+}
+const appStore = [];
+const ipStore = [];
+const domainStore = [];
+const renderAppTags = setupTagInput('appTags','appInput', appStore);
+setupTagInput('ipTags','ipInput', ipStore);
+setupTagInput('domainTags','domainInput', domainStore);
+
+document.querySelectorAll('.preset').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const val = btn.dataset.val;
+    if (!appStore.includes(val)){
+      appStore.push(val);
+      renderAppTags();
+    }
+  });
+});
+
+// ---------- run analysis ----------
+let charts = {};
+
+document.getElementById('runBtn').addEventListener('click', async () => {
+  const errorBox = document.getElementById('errorBox');
+  errorBox.style.display = 'none';
+
+  if (!selectedFile){
+    errorBox.textContent = 'Select a pcap file first.';
+    errorBox.style.display = 'block';
+    return;
+  }
+
+  const runBtn = document.getElementById('runBtn');
+  runBtn.disabled = true;
+  runBtn.textContent = 'Analyzing…';
+
+  document.getElementById('results').innerHTML = `
+    <div class="loading"><div class="spinner"></div> Running DPI engine on capture…</div>
+  `;
+
+  const fd = new FormData();
+  fd.append('pcap', selectedFile);
+  fd.append('engine', document.getElementById('engineSelect').value);
+  fd.append('block_apps', appStore.join(','));
+  fd.append('block_ips', ipStore.join(','));
+  fd.append('block_domains', domainStore.join(','));
+  fd.append('lbs', document.getElementById('lbs').value);
+  fd.append('fps', document.getElementById('fps').value);
+
+  try {
+    const resp = await fetch(API_BASE + '/api/analyze', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (!resp.ok){
+      throw new Error(data.detail || 'Analysis failed');
+    }
+    renderResults(data);
+    buildTicker((data.flows || []).slice(0, 40).map(f => f.blocked ? 'blk' : 'fwd'));
+  } catch (err){
+    document.getElementById('results').innerHTML = `<div class="empty">Analysis failed — see error below.</div>`;
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = 'Analyze capture';
+  }
+});
+
+function renderResults(data){
+  const results = document.getElementById('results');
+
+  const fwdPct = data.total_packets ? (100 * data.forwarded / data.total_packets).toFixed(1) : '0.0';
+  const blkPct = data.total_packets ? (100 * data.dropped / data.total_packets).toFixed(1) : '0.0';
+
+  results.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat"><div class="v">${data.total_packets ?? 0}</div><div class="k">Total Packets</div></div>
+      <div class="stat fwd"><div class="v">${data.forwarded ?? 0}</div><div class="k">Forwarded (${fwdPct}%)</div></div>
+      <div class="stat blk"><div class="v">${data.dropped ?? 0}</div><div class="k">Dropped (${blkPct}%)</div></div>
+      <div class="stat"><div class="v">${(data.flows || []).length}${data.active_flows && data.active_flows > (data.flows||[]).length ? '+' : ''}</div><div class="k">Active Flows</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Application breakdown</h2>
+      <div class="chart-wrap"><canvas id="appChart"></canvas></div>
+    </div>
+
+    <div class="panel section-gap">
+      <h2>Detected domains / SNIs</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Domain</th><th>Classified as</th></tr></thead>
+          <tbody>
+            ${(data.detected_domains || []).map(d => `<tr><td>${escapeHtml(d.domain)}</td><td>${escapeHtml(d.app)}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--muted)">No domains detected</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    ${(data.blocked_events && data.blocked_events.length) ? `
+    <div class="panel section-gap">
+      <h2>Blocked events</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Source</th><th>Destination</th><th>App</th><th>SNI</th></tr></thead>
+          <tbody>
+            ${data.blocked_events.map(e => `<tr><td>${escapeHtml(e.src_ip)}</td><td>${escapeHtml(e.dest_ip)}</td><td><span class="badge blk">${escapeHtml(e.app)}</span></td><td>${escapeHtml(e.sni || '—')}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ''}
+
+    <div class="panel section-gap">
+      <h2>Flows ${data.flows && data.flows.length >= 2000 ? '(first 2000)' : ''}</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Src</th><th>Dst</th><th>Port</th><th>Proto</th><th>App</th><th>Pkts</th><th>Bytes</th><th>Status</th></tr></thead>
+          <tbody>
+            ${(data.flows || []).slice(0, 300).map(f => `
+              <tr>
+                <td>${escapeHtml(f.src_ip)}</td>
+                <td>${escapeHtml(f.dest_ip)}</td>
+                <td>${f.dest_port}</td>
+                <td>${escapeHtml(f.protocol)}</td>
+                <td>${escapeHtml(f.app)}</td>
+                <td>${f.packets}</td>
+                <td>${f.bytes}</td>
+                <td>${f.blocked ? '<span class="badge blk">blocked</span>' : '<span class="badge fwd">forwarded</span>'}</td>
+              </tr>`).join('') || '<tr><td colspan="8" style="color:var(--muted)">No flows</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel section-gap">
+      <h2>Downloads</h2>
+      <div class="download-row">
+        <a class="dl-btn" href="${API_BASE}/api/runs/${data.run_id}/output.pcap">Filtered .pcap</a>
+        <a class="dl-btn" href="${API_BASE}/api/runs/${data.run_id}/report.json">Raw report.json</a>
+      </div>
+    </div>
+  `;
+
+  renderAppChart(data.app_breakdown || []);
+}
+
+function renderAppChart(breakdown){
+  const ctx = document.getElementById('appChart');
+  if (charts.app) charts.app.destroy();
+
+  const palette = ['#3DDC8A','#5B8CFF','#FF5C5C','#F2C94C','#BB86FC','#4FD1C5','#FF8A65','#90A4AE','#81C784','#64B5F6'];
+
+  charts.app = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: breakdown.map(b => b.app),
+      datasets: [{
+        data: breakdown.map(b => b.count),
+        backgroundColor: breakdown.map((_, i) => palette[i % palette.length]),
+        borderRadius: 4,
+        maxBarThickness: 28,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#1F2731' }, ticks: { color: '#6B7785', font: { family: 'JetBrains Mono', size: 10 } } },
+        y: { grid: { display: false }, ticks: { color: '#D7DEE5', font: { family: 'JetBrains Mono', size: 11 } } }
+      }
+    }
+  });
+}
+
+function escapeHtml(s){
+  if (s === undefined || s === null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>
